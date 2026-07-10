@@ -29,9 +29,9 @@ async function mockServices(page: Page, recognition: object | (() => object), ly
 test('handles microphone permission denial and retry', async ({ page }) => {
   await installAudio(page, { microphoneError: 'NotAllowedError' })
   await page.goto('./')
-  await expect(page.getByText('Let the music in.')).toBeVisible()
+  await expect(page.getByText('Microphone access is blocked.')).toBeVisible()
   await page.evaluate(() => { if (window.__LYRICFIND_TEST__) window.__LYRICFIND_TEST__.microphoneError = undefined })
-  await page.getByRole('button', { name: 'Try microphone again' }).click()
+  await page.getByRole('button', { name: 'Try again' }).click()
   await expect(page.getByText('Listening for music.')).toBeVisible()
   await expect(page.getByLabel('Microphone')).toHaveValue('test-mic')
 })
@@ -68,7 +68,7 @@ test('shows plain lyrics with a clear unsynchronized notice', async ({ page }) =
     instrumental: false, syncedLyrics: null, plainLyrics: 'These words are plain\nBut they are still here',
   }])
   await page.goto('./')
-  await expect(page.getByText('Unsynchronized lyrics')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('These lyrics aren’t time-synced')).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText(/These words are plain/)).toBeVisible()
 })
 
@@ -86,7 +86,7 @@ test('retains the current song offline and recovers on reconnect', async ({ page
   await expect(page.getByRole('heading', { name: 'Never Lost' })).toBeVisible()
   await context.setOffline(false)
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
-  await expect(page.getByText('Live & in sync')).toBeVisible()
+  await expect(page.getByText('In sync')).toBeVisible()
 })
 
 test('stopping listening invalidates a recognition response already in flight', async ({ page }) => {
@@ -97,10 +97,10 @@ test('stopping listening invalidates a recognition response already in flight', 
   })
   await page.route('https://lrclib.net/api/search**', async (route) => route.fulfill({ json: [] }))
   await page.goto('./')
-  await expect(page.getByText('Recognizing…')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('Matching the song…')).toBeVisible({ timeout: 10_000 })
   await page.getByRole('button', { name: 'Stop listening' }).click()
-  await expect(page.getByRole('heading', { name: 'Lyrics that keep up.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Lyrics for whatever’s playing.' })).toBeVisible()
   await page.waitForTimeout(1_200)
   await expect(page.getByRole('heading', { name: 'Too Late' })).not.toBeVisible()
-  await expect(page.getByText('Not listening')).toBeVisible()
+  await expect(page.getByText('Mic off')).toBeVisible()
 })

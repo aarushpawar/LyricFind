@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { AudioLines, ChevronDown, CircleAlert, Headphones, Mic, Pause, RefreshCw, ShieldCheck, WifiOff } from 'lucide-react'
+import { ChevronDown, CircleAlert, Headphones, Mic, Pause, RefreshCw, ShieldCheck, WifiOff } from 'lucide-react'
 import { AudioCapture } from './audio/audio-capture'
 import { FingerprintClient } from './audio/fingerprint-client'
 import { KaraokeLyrics } from './components/KaraokeLyrics'
@@ -253,7 +253,7 @@ export default function App() {
 
   const isListening = Boolean(captureRef.current)
   const isRecognizing = state.phase === 'recognizing'
-  const statusText = !online ? 'Offline' : isRecognizing ? 'Recognizing…' : state.track ? 'Live & in sync' : bufferedMs < MINIMUM_SAMPLE_MS && isListening ? `Listening · ${Math.floor(bufferedMs / 1000)}s` : isListening ? 'Ready to recognize' : 'Not listening'
+  const statusText = !online ? 'Offline' : isRecognizing ? 'Matching…' : state.track ? 'In sync' : bufferedMs < MINIMUM_SAMPLE_MS && isListening ? `Listening · ${Math.floor(bufferedMs / 1000)}s` : isListening ? 'Listening' : 'Mic off'
 
   return (
     <div className={state.track ? 'app matched-app' : 'app'}>
@@ -266,15 +266,14 @@ export default function App() {
       <main>
         {!state.track && (
           <section className="hero-state">
-            <div className={`listen-orb ${isListening ? 'is-listening' : ''} ${isRecognizing ? 'is-scanning' : ''}`}>
-              <div className="orb-ring ring-one" /><div className="orb-ring ring-two" />
-              <div className="orb-core">{state.phase === 'denied' || state.phase === 'unsupported' ? <CircleAlert /> : isRecognizing ? <AudioLines /> : <Mic />}</div>
-            </div>
-            {state.phase === 'denied' ? <><p className="eyebrow">MICROPHONE BLOCKED</p><h1>Let the music in.</h1><p className="hero-copy">Allow microphone access in your browser’s site settings, then try again. LyricFind never uploads your raw audio.</p><button className="primary-button" onClick={() => void startListening()}><Mic /> Try microphone again</button></>
-              : state.phase === 'unsupported' ? <><p className="eyebrow">BROWSER NOT SUPPORTED</p><h1>This browser can’t listen yet.</h1><p className="hero-copy">Use a current version of Chrome, Edge, Firefox, or Safari with Web Audio and WebAssembly enabled.</p></>
-              : state.phase === 'requesting' ? <><p className="eyebrow">ONE QUICK THING</p><h1>Allow microphone access.</h1><p className="hero-copy">Your browser may be waiting for you to approve listening.</p><button className="primary-button" onClick={() => void startListening()}><Mic /> Start listening</button></>
-              : state.phase === 'no-match' ? <><p className="eyebrow">STILL LISTENING</p><h1>Turn it up a little.</h1><p className="hero-copy">We couldn’t place that song yet. Keep the clearest part playing and scan again.</p><button className="primary-button" onClick={() => void scan(true)}><RefreshCw /> Scan again</button></>
-              : <><p className="eyebrow">{isRecognizing ? 'MATCHING THE MOMENT' : isListening ? 'LIVE MUSIC DISCOVERY' : 'YOUR KARAOKE COMPANION'}</p><h1>{isRecognizing ? 'Finding your song…' : isListening ? 'Listening for music.' : 'Lyrics that keep up.'}</h1><p className="hero-copy">{isListening ? 'Play a song nearby. We’ll recognize it and bring every line in right on time.' : 'Hear a song. See the words. Sing along—live and in sync.'}</p>{!isListening && <button className="primary-button" onClick={() => void startListening()}><Mic /> Start listening</button>}</>}
+            {state.phase === 'denied' || state.phase === 'unsupported'
+              ? <div className="hero-alert"><CircleAlert /></div>
+              : <div className={`listen-meter ${isListening ? 'is-listening' : ''} ${isRecognizing ? 'is-scanning' : ''}`}><i /><i /><i /><i /><i /></div>}
+            {state.phase === 'denied' ? <><h1>Microphone access is blocked.</h1><p className="hero-copy">Allow the microphone in your browser’s site settings, then try again. Audio is fingerprinted on this device and never uploaded.</p><button className="primary-button" onClick={() => void startListening()}><Mic /> Try again</button></>
+              : state.phase === 'unsupported' ? <><h1>This browser can’t run LyricFind.</h1><p className="hero-copy">It needs Web Audio, web workers, and WebAssembly. Current versions of Chrome, Edge, Firefox, and Safari all work.</p></>
+              : state.phase === 'requesting' ? <><h1>Waiting on the microphone.</h1><p className="hero-copy">Your browser is asking for permission to listen.</p><button className="primary-button" onClick={() => void startListening()}><Mic /> Start listening</button></>
+              : state.phase === 'no-match' ? <><h1>No match yet.</h1><p className="hero-copy">Get closer to the speaker or turn the music up, then scan again.</p><button className="primary-button" onClick={() => void scan(true)}><RefreshCw /> Scan again</button></>
+              : <><h1>{isRecognizing ? 'Matching the song…' : isListening ? 'Listening for music.' : 'Lyrics for whatever’s playing.'}</h1><p className="hero-copy">{isRecognizing ? 'Comparing a few seconds of audio against the song catalog.' : isListening ? 'Play something near the microphone. The song and its lyrics appear once there’s a match.' : 'LyricFind names the song around you and scrolls the words in time. Audio never leaves this device.'}</p>{!isListening && <button className="primary-button" onClick={() => void startListening()}><Mic /> Start listening</button>}</>}
             {state.message && <div className="state-message" role="status"><CircleAlert /> {state.message}</div>}
           </section>
         )}
@@ -283,7 +282,7 @@ export default function App() {
           <section className="karaoke-view">
             <div className="track-card">
               <div className="cover-wrap">{state.track.artworkUrl ? <img src={state.track.artworkUrl} alt="" /> : <div className="cover-fallback"><Headphones /></div>}<span className="playing-bars"><i /><i /><i /></span></div>
-              <div className="track-meta"><span className="now-playing">NOW PLAYING</span><h1>{state.track.title}</h1><p>{state.track.artist}{state.track.album ? ` · ${state.track.album}` : ''}</p></div>
+              <div className="track-meta"><h1>{state.track.title}</h1><p>{state.track.artist}{state.track.album ? ` · ${state.track.album}` : ''}</p></div>
               {state.stale && <div className="stale-badge"><WifiOff /> {state.message || 'Refreshing match…'}</div>}
             </div>
             <KaraokeLyrics lyrics={state.lyrics} activeIndex={activeIndex} />
@@ -292,12 +291,12 @@ export default function App() {
       </main>
 
       {isListening && <div className="controls-dock">
-        <label className="device-picker"><Mic /><span><small>INPUT</small><select aria-label="Microphone" value={deviceId} onChange={(event) => { const value = event.target.value; setDeviceId(value); void startListening(value) }}>{devices.length ? devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>) : <option value="">Default microphone</option>}</select></span><ChevronDown /></label>
+        <label className="device-picker"><Mic /><span><small>Input</small><select aria-label="Microphone" value={deviceId} onChange={(event) => { const value = event.target.value; setDeviceId(value); void startListening(value) }}>{devices.length ? devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>) : <option value="">Default microphone</option>}</select></span><ChevronDown /></label>
         <button className="icon-control" onClick={() => void stopListening()} aria-label="Stop listening"><Pause /></button>
         <button className="scan-button" disabled={isRecognizing} onClick={() => void scan(true)}><RefreshCw className={isRecognizing ? 'spin' : ''} />{isRecognizing ? 'Scanning' : 'Scan again'}</button>
       </div>}
 
-      <footer><span><ShieldCheck /> Audio stays on this device. Only an anonymous fingerprint is sent for matching.</span><a href="https://lrclib.net" target="_blank" rel="noreferrer">Lyrics by LRCLIB</a></footer>
+      <footer><span><ShieldCheck /> Audio stays on this device. Only an anonymous fingerprint is sent for matching.</span><a href="https://lrclib.net" target="_blank" rel="noreferrer">Lyrics from LRCLIB</a></footer>
     </div>
   )
 }
