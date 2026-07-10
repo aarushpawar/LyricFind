@@ -139,7 +139,7 @@ export default function App() {
     if (!capture || !fingerprinter) return
     const snapshot = capture.snapshot()
     if (!snapshot || snapshot.sampleMs < MINIMUM_SAMPLE_MS) {
-      if (force) dispatch({ type: 'NETWORK_ERROR', message: `Gathering sound… ${Math.floor((snapshot?.sampleMs ?? 0) / 1000)} of 8 seconds ready.` })
+      // ponytail: progress is already shown by the status pill (`Listening · Ns`); no separate message.
       return
     }
     if (!schedulerRef.current.tryStart(performance.now(), force)) return
@@ -251,7 +251,7 @@ export default function App() {
               : state.phase === 'requesting' ? <><p className="eyebrow">ONE QUICK THING</p><h1>Allow microphone access.</h1><p className="hero-copy">Your browser may be waiting for you to approve listening.</p><button className="primary-button" onClick={() => void startListening()}><Mic /> Start listening</button></>
               : state.phase === 'no-match' ? <><p className="eyebrow">STILL LISTENING</p><h1>Turn it up a little.</h1><p className="hero-copy">We couldn’t place that song yet. Keep the clearest part playing and scan again.</p><button className="primary-button" onClick={() => void scan(true)}><RefreshCw /> Scan again</button></>
               : <><p className="eyebrow">{isRecognizing ? 'MATCHING THE MOMENT' : isListening ? 'LIVE MUSIC DISCOVERY' : 'YOUR KARAOKE COMPANION'}</p><h1>{isRecognizing ? 'Finding your song…' : isListening ? 'Listening for music.' : 'Lyrics that keep up.'}</h1><p className="hero-copy">{isListening ? 'Play a song nearby. We’ll recognize it and bring every line in right on time.' : 'Hear a song. See the words. Sing along—live and in sync.'}</p>{!isListening && <button className="primary-button" onClick={() => void startListening()}><Mic /> Start listening</button>}</>}
-            {state.message && <div className="state-message">{state.message}</div>}
+            {state.message && <div className="state-message" role="status"><CircleAlert /> {state.message}</div>}
           </section>
         )}
 
