@@ -26,7 +26,7 @@ export interface LyricLine {
 }
 
 export type Lyrics =
-  | { kind: 'synced'; lines: LyricLine[]; sourceId: number }
+  | { kind: 'synced'; lines: LyricLine[]; sourceId: number; durationSeconds?: number }
   | { kind: 'plain'; text: string; sourceId: number }
   | { kind: 'instrumental'; sourceId: number }
   | { kind: 'missing' }

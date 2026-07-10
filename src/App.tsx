@@ -12,7 +12,9 @@ import { makePlaybackAnchor, playbackPosition } from './lib/timing'
 import type { Lyrics, Track } from './types'
 import './styles.css'
 
-const MINIMUM_SAMPLE_MS = 8_000
+// Shazam matches reliably on ~5s; a shorter first buffer means faster time-to-lyrics.
+// ponytail: bump back toward 8s if match rate drops on noisy input.
+const MINIMUM_SAMPLE_MS = 5_000
 
 function trackKey(track: Track): string {
   return track.isrc || `${track.id}:${track.title}:${track.artist}`
@@ -138,6 +140,13 @@ export default function App() {
     const capture = captureRef.current
     const fingerprinter = fingerprintRef.current
     if (!capture || !fingerprinter) return
+    // Once we have synced lyrics, don't burn a recognition (or the rate limit) until the
+    // song is over. A forced scan (button press) always overrides. Without a known duration
+    // we can't tell when it ends, so fall back to the normal scheduled cadence.
+    const { lyrics, anchor } = stateRef.current
+    if (!force && lyrics?.kind === 'synced' && lyrics.durationSeconds && anchor) {
+      if (playbackPosition(anchor, performance.now()) < lyrics.durationSeconds) return
+    }
     const snapshot = capture.snapshot()
     if (!snapshot || snapshot.sampleMs < MINIMUM_SAMPLE_MS) {
       // ponytail: progress is already shown by the status pill (`Listening · Ns`); no separate message.
