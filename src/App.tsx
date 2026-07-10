@@ -25,6 +25,7 @@ export default function App() {
   const fingerprintRef = useRef<FingerprintClient | undefined>(undefined)
   const schedulerRef = useRef(new ScanScheduler())
   const scanEpochRef = useRef(0)
+  const failureCountRef = useRef(0)
   const scanAbortRef = useRef<AbortController | undefined>(undefined)
   const lyricsAbortRef = useRef<AbortController | undefined>(undefined)
   const lyricsCache = useRef(new Map<string, Lyrics>())
@@ -161,8 +162,12 @@ export default function App() {
       const anchor = makePlaybackAnchor(result.matchOffsetSeconds, result.timeSkew, fingerprint.snapshotStartedAtMs)
       dispatch({ type: 'MATCH', track: result.track, anchor })
       if (previousKey !== trackKey(result.track) || !stateRef.current.lyrics) void lookupLyrics(result.track, epoch)
+      failureCountRef.current = 0
     } catch (error) {
       if (epoch !== scanEpochRef.current || controller.signal.aborted) return
+      // ponytail: one transient blip (Shazam 429 → 502) recovers next scan; only surface
+      // the error after two consecutive failures so a lone blip stays silent.
+      if (++failureCountRef.current < 2) return
       dispatch({ type: 'NETWORK_ERROR', message: error instanceof Error ? error.message : 'Recognition is temporarily unavailable. Retrying…' })
     } finally {
       if (scanAbortRef.current === controller) scanAbortRef.current = undefined

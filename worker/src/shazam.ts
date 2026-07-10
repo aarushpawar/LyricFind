@@ -120,7 +120,7 @@ export async function recognizeWithShazam(
     video: "v3",
   }).toString();
 
-  const response = await fetchImpl(endpoint, {
+  const init: RequestInit = {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -138,10 +138,20 @@ export async function recognizeWithShazam(
       timestamp,
       timezone: "Etc/UTC",
     }),
-  });
+  };
+
+  // Shazam throttles bursts with 429/5xx; one retry after a short backoff absorbs
+  // most of them. ponytail: single retry, add exponential backoff only if 502s persist.
+  let response = await fetchImpl(endpoint, init);
+  if (response.status >= 429) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    response = await fetchImpl(endpoint, init);
+  }
 
   if (!response.ok) {
-    throw new Error(`Shazam request failed with status ${response.status}`);
+    const err = new Error(`Shazam request failed with status ${response.status}`);
+    (err as Error & { transient?: boolean }).transient = response.status >= 429;
+    throw err;
   }
 
   return normalizeShazamResponse(await response.json());
