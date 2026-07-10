@@ -140,11 +140,12 @@ export async function recognizeWithShazam(
     }),
   };
 
-  // Shazam throttles bursts with 429/5xx; one retry after a short backoff absorbs
-  // most of them. ponytail: single retry, add exponential backoff only if 502s persist.
+  // Shazam throttles bursts with 429/5xx; a couple of short backoff retries absorb
+  // most of them before the client ever sees a 502.
   let response = await fetchImpl(endpoint, init);
-  if (response.status >= 429) {
-    await new Promise((resolve) => setTimeout(resolve, 400));
+  for (const delayMs of [400, 900]) {
+    if (response.status < 429) break;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
     response = await fetchImpl(endpoint, init);
   }
 

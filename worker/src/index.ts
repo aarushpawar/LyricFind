@@ -201,24 +201,13 @@ export function createWorker(dependencies: HandlerDependencies = {}) {
       // Enforce both a server-controlled identity and the persistent browser ID.
       // Rotating clientId values cannot evade the IP limit, while the client limit
       // also follows one browser across network changes.
-      const ipRateLimit = await env.RECOGNITION_IP_RATE_LIMITER.limit({
-        key: `recognize:ip:${clientIp}`,
-      });
-      if (!ipRateLimit.success) {
-        return error(
-          request,
-          env,
-          429,
-          "rate_limited",
-          "Recognition limit exceeded; try again in one minute",
-          { "Retry-After": "60" },
-        );
-      }
-
-      const clientRateLimit = await env.RECOGNITION_CLIENT_RATE_LIMITER.limit({
-        key: `recognize:client:${validated.clientId}`,
-      });
-      if (!clientRateLimit.success) {
+      const [ipRateLimit, clientRateLimit] = await Promise.all([
+        env.RECOGNITION_IP_RATE_LIMITER.limit({ key: `recognize:ip:${clientIp}` }),
+        env.RECOGNITION_CLIENT_RATE_LIMITER.limit({
+          key: `recognize:client:${validated.clientId}`,
+        }),
+      ]);
+      if (!ipRateLimit.success || !clientRateLimit.success) {
         return error(
           request,
           env,

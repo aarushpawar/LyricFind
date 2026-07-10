@@ -12,9 +12,13 @@ import { makePlaybackAnchor, playbackPosition } from './lib/timing'
 import type { Lyrics, Track } from './types'
 import './styles.css'
 
-// Shazam matches reliably on ~5s; a shorter first buffer means faster time-to-lyrics.
-// ponytail: bump back toward 8s if match rate drops on noisy input.
-const MINIMUM_SAMPLE_MS = 5_000
+// Shazam often matches on ~3.5s; a shorter first buffer means faster time-to-lyrics.
+// A miss retries quickly (see scan) with a longer sample, so an early failure is cheap.
+// ponytail: bump back toward 5s if the first-attempt match rate is uselessly low.
+const MINIMUM_SAMPLE_MS = 3_500
+// Retry cadence: quick while hunting for a match, relaxed once locked on.
+const SEARCHING_SCAN_INTERVAL_MS = 6_000
+const MATCHED_SCAN_INTERVAL_MS = 12_000
 
 function trackKey(track: Track): string {
   return track.isrc || `${track.id}:${track.title}:${track.artist}`
@@ -152,6 +156,7 @@ export default function App() {
       // ponytail: progress is already shown by the status pill (`Listening · Ns`); no separate message.
       return
     }
+    schedulerRef.current.minimumIntervalMs = stateRef.current.track ? MATCHED_SCAN_INTERVAL_MS : SEARCHING_SCAN_INTERVAL_MS
     if (!schedulerRef.current.tryStart(performance.now(), force)) return
     const epoch = scanEpochRef.current
     const controller = new AbortController()
@@ -191,10 +196,11 @@ export default function App() {
   }, [startListening])
 
   useEffect(() => {
+    // 250ms so a just-ready buffer isn't left waiting most of a second before the first scan.
     const interval = window.setInterval(() => {
       setBufferedMs(captureRef.current?.bufferedMs ?? 0)
       if (captureRef.current?.bufferedMs && captureRef.current.bufferedMs >= MINIMUM_SAMPLE_MS) void scan(false)
-    }, 1_000)
+    }, 250)
     return () => window.clearInterval(interval)
   }, [scan])
 

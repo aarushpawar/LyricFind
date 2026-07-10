@@ -1,5 +1,5 @@
 export class ScanScheduler {
-  readonly minimumIntervalMs: number
+  minimumIntervalMs: number
   private busy = false
   private visible = true
   private lastAutomaticAt = Number.NEGATIVE_INFINITY

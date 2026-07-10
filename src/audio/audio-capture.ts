@@ -31,7 +31,8 @@ export class AudioCapture {
       this.context = new AudioContext({ latencyHint: 'interactive' })
       await this.context.audioWorklet.addModule(`${import.meta.env.BASE_URL}audio-capture-worklet.js`)
       await this.context.resume()
-      this.buffer = new RollingPcmBuffer(this.context.sampleRate, 10)
+      // 12s: Shazam accepts up to ~12s tags, and longer retry samples match hard songs better.
+      this.buffer = new RollingPcmBuffer(this.context.sampleRate, 12)
       this.source = this.context.createMediaStreamSource(this.stream)
       this.processor = new AudioWorkletNode(this.context, 'lyricfind-capture', {
         numberOfInputs: 1,

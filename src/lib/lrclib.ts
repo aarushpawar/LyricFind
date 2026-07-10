@@ -73,10 +73,16 @@ export async function fetchLyrics(track: Track, signal?: AbortSignal): Promise<L
   // so a ?q=ISRC search always returns []; don't waste a round-trip on it.
   const params = new URLSearchParams({ track_name: track.title, artist_name: track.artist })
   if (track.album) params.set('album_name', track.album)
-  const exact = await request<LrcLibResult | null>(`https://lrclib.net/api/get?${params}`, null)
+  let exact = await request<LrcLibResult | null>(`https://lrclib.net/api/get?${params}`, null)
+  // Shazam album names often differ from LRCLIB's (deluxe editions, singles), which 404s
+  // the exact lookup. Retry without the album before resorting to the slow fuzzy search.
+  if (!exact && track.album) {
+    params.delete('album_name')
+    exact = await request<LrcLibResult | null>(`https://lrclib.net/api/get?${params}`, null)
+  }
   if (exact) return lyricsFromResult(exact)
 
-  // Fall back to fuzzy search only when the exact lookup misses.
+  // Fall back to fuzzy search only when the exact lookups miss.
   const candidates = await request<LrcLibResult[]>(`https://lrclib.net/api/search?${params}`, [])
   return lyricsFromResult(selectLyricsResult(candidates, track))
 }
