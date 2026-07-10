@@ -51,7 +51,7 @@ export function lyricsFromResult(result: LrcLibResult | undefined): Lyrics {
   if (result.instrumental) return { kind: 'instrumental', sourceId: result.id }
   if (result.syncedLyrics) {
     const lines = parseLrc(result.syncedLyrics)
-    if (lines.length) return { kind: 'synced', lines, sourceId: result.id }
+    if (lines.length) return { kind: 'synced', lines, sourceId: result.id, durationSeconds: result.duration }
   }
   if (result.plainLyrics?.trim()) return { kind: 'plain', text: result.plainLyrics.trim(), sourceId: result.id }
   return { kind: 'missing' }
