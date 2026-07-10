@@ -1,0 +1,10 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+coverage/
+.wrangler/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
