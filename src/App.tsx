@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { AudioLines, ChevronDown, CircleAlert, Headphones, Mic, Pause, RefreshCw, ShieldCheck, WifiOff } from 'lucide-react'
 import { AudioCapture } from './audio/audio-capture'
 import { FingerprintClient } from './audio/fingerprint-client'
@@ -24,11 +24,14 @@ export default function App() {
   const captureRef = useRef<AudioCapture | undefined>(undefined)
   const fingerprintRef = useRef<FingerprintClient | undefined>(undefined)
   const schedulerRef = useRef(new ScanScheduler())
+  const scanEpochRef = useRef(0)
+  const scanAbortRef = useRef<AbortController | undefined>(undefined)
+  const lyricsAbortRef = useRef<AbortController | undefined>(undefined)
   const lyricsCache = useRef(new Map<string, Lyrics>())
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [deviceId, setDeviceId] = useState('')
   const [bufferedMs, setBufferedMs] = useState(0)
-  const [position, setPosition] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(-1)
   const [online, setOnline] = useState(navigator.onLine)
   const autoAttemptedRef = useRef(false)
 
@@ -41,13 +44,21 @@ export default function App() {
   }, [deviceId])
 
   const stopListening = useCallback(async () => {
-    await captureRef.current?.stop()
-    captureRef.current = undefined
+    scanEpochRef.current += 1
+    scanAbortRef.current?.abort()
+    scanAbortRef.current = undefined
+    lyricsAbortRef.current?.abort()
+    lyricsAbortRef.current = undefined
     fingerprintRef.current?.terminate()
     fingerprintRef.current = undefined
+    const capture = captureRef.current
+    captureRef.current = undefined
     schedulerRef.current.finish()
     setBufferedMs(0)
+    setActiveIndex(-1)
+    stateRef.current = initialSessionState
     dispatch({ type: 'STOP' })
+    await capture?.stop()
   }, [])
 
   const startListening = useCallback(async (selectedDevice = deviceId) => {
@@ -55,37 +66,70 @@ export default function App() {
       dispatch({ type: 'UNSUPPORTED' })
       return
     }
+    const existingCapture = captureRef.current
+    const epoch = ++scanEpochRef.current
+    scanAbortRef.current?.abort()
+    scanAbortRef.current = undefined
+    lyricsAbortRef.current?.abort()
+    lyricsAbortRef.current = undefined
+    fingerprintRef.current?.terminate()
+    fingerprintRef.current = undefined
+    schedulerRef.current.finish()
     dispatch({ type: 'REQUEST_PERMISSION' })
+    let pendingCapture: AudioCapture | undefined
     try {
       const capture = new AudioCapture()
+      pendingCapture = capture
       await capture.start(selectedDevice || undefined)
-      await captureRef.current?.stop()
-      fingerprintRef.current?.terminate()
+      if (epoch !== scanEpochRef.current) {
+        await capture.stop()
+        return
+      }
+      const previousCapture = captureRef.current
+      const fingerprinter = new FingerprintClient()
       captureRef.current = capture
-      fingerprintRef.current = new FingerprintClient()
+      fingerprintRef.current = fingerprinter
+      pendingCapture = undefined
       schedulerRef.current = new ScanScheduler()
       dispatch({ type: 'LISTENING' })
+      await previousCapture?.stop()
       await refreshDevices()
     } catch (error) {
+      await pendingCapture?.stop()
+      if (epoch !== scanEpochRef.current) return
+      if (existingCapture && captureRef.current === existingCapture) {
+        try { fingerprintRef.current = new FingerprintClient() } catch { fingerprintRef.current = undefined }
+        schedulerRef.current = new ScanScheduler()
+        dispatch({
+          type: 'NETWORK_ERROR',
+          message: `Could not switch microphones. Continuing with the previous input. ${error instanceof Error ? error.message : ''}`.trim(),
+        })
+        return
+      }
       const name = error instanceof DOMException ? error.name : ''
       if (name === 'NotAllowedError' || name === 'SecurityError') dispatch({ type: 'DENIED' })
       else dispatch({ type: 'NETWORK_ERROR', message: error instanceof Error ? error.message : 'Could not start the microphone.' })
     }
   }, [deviceId, refreshDevices])
 
-  const lookupLyrics = useCallback(async (track: Track) => {
+  const lookupLyrics = useCallback(async (track: Track, epoch: number) => {
     const key = trackKey(track)
     const cached = lyricsCache.current.get(key)
     if (cached) {
-      dispatch({ type: 'LYRICS', lyrics: cached })
+      if (epoch === scanEpochRef.current) dispatch({ type: 'LYRICS', lyrics: cached })
       return
     }
+    lyricsAbortRef.current?.abort()
+    const controller = new AbortController()
+    lyricsAbortRef.current = controller
     try {
-      const lyrics = await fetchLyrics(track)
+      const lyrics = await fetchLyrics(track, controller.signal)
       lyricsCache.current.set(key, lyrics)
-      if (stateRef.current.track && trackKey(stateRef.current.track) === key) dispatch({ type: 'LYRICS', lyrics })
-    } catch {
-      if (stateRef.current.track && trackKey(stateRef.current.track) === key) dispatch({ type: 'LYRICS', lyrics: { kind: 'missing' } })
+      if (epoch === scanEpochRef.current && stateRef.current.track && trackKey(stateRef.current.track) === key) dispatch({ type: 'LYRICS', lyrics })
+    } catch (error) {
+      if (epoch === scanEpochRef.current && !controller.signal.aborted && stateRef.current.track && trackKey(stateRef.current.track) === key) dispatch({ type: 'LYRICS', lyrics: { kind: 'missing' } })
+    } finally {
+      if (lyricsAbortRef.current === controller) lyricsAbortRef.current = undefined
     }
   }, [])
 
@@ -99,11 +143,16 @@ export default function App() {
       return
     }
     if (!schedulerRef.current.tryStart(performance.now(), force)) return
+    const epoch = scanEpochRef.current
+    const controller = new AbortController()
+    scanAbortRef.current = controller
     dispatch({ type: 'SCANNING' })
     try {
       if (!navigator.onLine) throw new Error('You’re offline. Lyrics will stay here while we reconnect.')
       const fingerprint = await fingerprinter.create(snapshot)
-      const result = await recognize(fingerprint)
+      if (epoch !== scanEpochRef.current || controller.signal.aborted) return
+      const result = await recognize(fingerprint, controller.signal)
+      if (epoch !== scanEpochRef.current || controller.signal.aborted) return
       if (result.status === 'no_match') {
         dispatch({ type: 'NO_MATCH' })
         return
@@ -111,11 +160,13 @@ export default function App() {
       const previousKey = stateRef.current.track ? trackKey(stateRef.current.track) : undefined
       const anchor = makePlaybackAnchor(result.matchOffsetSeconds, result.timeSkew, fingerprint.snapshotStartedAtMs)
       dispatch({ type: 'MATCH', track: result.track, anchor })
-      if (previousKey !== trackKey(result.track) || !stateRef.current.lyrics) void lookupLyrics(result.track)
+      if (previousKey !== trackKey(result.track) || !stateRef.current.lyrics) void lookupLyrics(result.track, epoch)
     } catch (error) {
+      if (epoch !== scanEpochRef.current || controller.signal.aborted) return
       dispatch({ type: 'NETWORK_ERROR', message: error instanceof Error ? error.message : 'Recognition is temporarily unavailable. Retrying…' })
     } finally {
-      schedulerRef.current.finish()
+      if (scanAbortRef.current === controller) scanAbortRef.current = undefined
+      if (epoch === scanEpochRef.current) schedulerRef.current.finish()
     }
   }, [lookupLyrics])
 
@@ -134,15 +185,21 @@ export default function App() {
   }, [scan])
 
   useEffect(() => {
-    let frame = 0
-    const tick = () => {
-      const anchor = stateRef.current.anchor
-      if (anchor) setPosition(playbackPosition(anchor, performance.now()))
-      frame = requestAnimationFrame(tick)
+    const anchor = state.anchor
+    const lines = state.lyrics?.kind === 'synced' ? state.lyrics.lines : undefined
+    if (!anchor || !lines) {
+      setActiveIndex(-1)
+      return
     }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
-  }, [])
+    const updateActiveLine = () => {
+      const position = playbackPosition(anchor, performance.now())
+      const nextIndex = activeLyricIndex(lines, position)
+      setActiveIndex((current) => current === nextIndex ? current : nextIndex)
+    }
+    updateActiveLine()
+    const interval = window.setInterval(updateActiveLine, 200)
+    return () => window.clearInterval(interval)
+  }, [state.anchor, state.lyrics])
 
   useEffect(() => {
     const onVisibility = () => {
@@ -163,11 +220,13 @@ export default function App() {
   }, [scan])
 
   useEffect(() => () => {
+    scanEpochRef.current += 1
+    scanAbortRef.current?.abort()
+    lyricsAbortRef.current?.abort()
     void captureRef.current?.stop()
     fingerprintRef.current?.terminate()
   }, [])
 
-  const activeIndex = useMemo(() => state.lyrics?.kind === 'synced' ? activeLyricIndex(state.lyrics.lines, position) : -1, [position, state.lyrics])
   const isListening = Boolean(captureRef.current)
   const isRecognizing = state.phase === 'recognizing'
   const statusText = !online ? 'Offline' : isRecognizing ? 'Recognizing…' : state.track ? 'Live & in sync' : bufferedMs < MINIMUM_SAMPLE_MS && isListening ? `Listening · ${Math.floor(bufferedMs / 1000)}s` : isListening ? 'Ready to recognize' : 'Not listening'

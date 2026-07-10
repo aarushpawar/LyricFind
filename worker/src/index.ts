@@ -120,6 +120,11 @@ function originAllowed(request: Request, env: Env): boolean {
   return !origin || configuredOrigins(env).has(origin);
 }
 
+function connectingIp(request: Request): string | null {
+  const value = request.headers.get("CF-Connecting-IP")?.trim();
+  return value || null;
+}
+
 export function createWorker(dependencies: HandlerDependencies = {}) {
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
@@ -150,6 +155,15 @@ export function createWorker(dependencies: HandlerDependencies = {}) {
           Allow: "POST, OPTIONS",
         });
       }
+      if (!request.headers.get("Origin")) {
+        return error(
+          request,
+          env,
+          403,
+          "origin_required",
+          "Recognition requests must come from an allowed browser origin",
+        );
+      }
       if (!request.headers.get("Content-Type")?.toLowerCase().startsWith("application/json")) {
         return error(
           request,
@@ -173,10 +187,38 @@ export function createWorker(dependencies: HandlerDependencies = {}) {
         return error(request, env, 400, "invalid_request", validated);
       }
 
-      const rateLimit = await env.RECOGNITION_RATE_LIMITER.limit({
-        key: `recognize:${validated.clientId}`,
+      const clientIp = connectingIp(request);
+      if (!clientIp) {
+        return error(
+          request,
+          env,
+          400,
+          "client_identity_unavailable",
+          "Cloudflare client identity is unavailable",
+        );
+      }
+
+      // Enforce both a server-controlled identity and the persistent browser ID.
+      // Rotating clientId values cannot evade the IP limit, while the client limit
+      // also follows one browser across network changes.
+      const ipRateLimit = await env.RECOGNITION_IP_RATE_LIMITER.limit({
+        key: `recognize:ip:${clientIp}`,
       });
-      if (!rateLimit.success) {
+      if (!ipRateLimit.success) {
+        return error(
+          request,
+          env,
+          429,
+          "rate_limited",
+          "Recognition limit exceeded; try again in one minute",
+          { "Retry-After": "60" },
+        );
+      }
+
+      const clientRateLimit = await env.RECOGNITION_CLIENT_RATE_LIMITER.limit({
+        key: `recognize:client:${validated.clientId}`,
+      });
+      if (!clientRateLimit.success) {
         return error(
           request,
           env,

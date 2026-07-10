@@ -3,7 +3,8 @@ export interface RateLimitBinding {
 }
 
 export interface Env {
-  RECOGNITION_RATE_LIMITER: RateLimitBinding;
+  RECOGNITION_CLIENT_RATE_LIMITER: RateLimitBinding;
+  RECOGNITION_IP_RATE_LIMITER: RateLimitBinding;
   ALLOWED_ORIGINS?: string;
   SHAZAM_RECOGNITION_URL?: string;
 }

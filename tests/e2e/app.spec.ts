@@ -86,3 +86,19 @@ test('retains the current song offline and recovers on reconnect', async ({ page
   await page.evaluate(() => window.dispatchEvent(new Event('online')))
   await expect(page.getByText('Live & in sync')).toBeVisible()
 })
+
+test('stopping listening invalidates a recognition response already in flight', async ({ page }) => {
+  await installAudio(page)
+  await page.route('https://recognition.test/recognize', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    await route.fulfill({ json: match('5', 'Too Late') }).catch(() => undefined)
+  })
+  await page.route('https://lrclib.net/api/search**', async (route) => route.fulfill({ json: [] }))
+  await page.goto('./')
+  await expect(page.getByText('Recognizing…')).toBeVisible({ timeout: 10_000 })
+  await page.getByRole('button', { name: 'Stop listening' }).click()
+  await expect(page.getByRole('heading', { name: 'Lyrics that keep up.' })).toBeVisible()
+  await page.waitForTimeout(1_200)
+  await expect(page.getByRole('heading', { name: 'Too Late' })).not.toBeVisible()
+  await expect(page.getByText('Not listening')).toBeVisible()
+})

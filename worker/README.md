@@ -11,9 +11,11 @@ must never be sent to this service.
 - `OPTIONS` handles CORS preflight for the production GitHub Pages origin and
   the local Vite origins configured in `ALLOWED_ORIGINS`.
 
-Valid recognition requests are rate-limited to 10 per minute per client UUID by
-Cloudflare's rate-limit binding. The binding is per Cloudflare location, as
-documented by Cloudflare, and intentionally runs only after payload validation.
+Valid recognition requests require an allowed `Origin` and Cloudflare's
+server-supplied `CF-Connecting-IP`. Separate native bindings enforce 10 requests
+per minute for both that IP and the persistent client UUID. UUID rotation cannot
+bypass the IP limit; visitors behind one public IP share its allowance. Both
+bindings intentionally run only after payload validation.
 
 ## Local commands
 
@@ -28,6 +30,6 @@ npm run dev
 `VITE_RECOGNITION_URL` in the frontend to the deployed Worker URL; no Shazam key
 or recognition secret is required.
 
-Before deployment, change `namespace_id` only if `1001` is already used by a
-different rate-limit binding in the same Cloudflare account. Namespace IDs are
-account-local positive integer strings.
+Before deployment, change either `namespace_id` if `1001` or `1002` is already
+used by a different rate-limit binding in the same Cloudflare account.
+Namespace IDs are account-local positive integer strings.

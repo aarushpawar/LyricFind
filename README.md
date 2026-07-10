@@ -57,7 +57,7 @@ Configure these repository settings before the first deployment:
 - Actions variable: `VITE_RECOGNITION_URL` (the public Worker origin, without `/recognize`)
 - Settings → Pages → Source: **GitHub Actions**
 
-The Worker permits `https://aarushpawar.github.io` plus local Vite development origins. Its native rate-limit binding allows ten recognition requests per client UUID per minute. If rate-limit namespace `1001` is already used by another binding in the Cloudflare account, choose a new positive integer in `worker/wrangler.jsonc`.
+The Worker permits `https://aarushpawar.github.io` plus local Vite development origins and rejects originless recognition calls. Two native bindings enforce ten recognition requests per minute for both the persistent client UUID and Cloudflare’s server-supplied connecting IP, so rotating UUIDs cannot bypass the public limit. Visitors sharing one public IP also share that IP allowance. If rate-limit namespace `1001` or `1002` is already used by another binding in the Cloudflare account, choose new positive integers in `worker/wrangler.jsonc`.
 
 ## Verification checklist
 

@@ -9,8 +9,16 @@
   },
   "ratelimits": [
     {
-      "name": "RECOGNITION_RATE_LIMITER",
+      "name": "RECOGNITION_CLIENT_RATE_LIMITER",
       "namespace_id": "1001",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "RECOGNITION_IP_RATE_LIMITER",
+      "namespace_id": "1002",
       "simple": {
         "limit": 10,
         "period": 60

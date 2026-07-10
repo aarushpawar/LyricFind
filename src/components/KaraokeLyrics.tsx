@@ -10,8 +10,12 @@ export function KaraokeLyrics({ lyrics, activeIndex }: Props) {
   const lineRefs = useRef<Array<HTMLParagraphElement | null>>([])
 
   useEffect(() => {
-    if (activeIndex < 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    lineRefs.current[activeIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (activeIndex < 0) return
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    lineRefs.current[activeIndex]?.scrollIntoView({
+      behavior: reducedMotion ? 'auto' : 'smooth',
+      block: 'center',
+    })
   }, [activeIndex])
 
   if (!lyrics) {

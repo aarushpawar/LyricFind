@@ -9,12 +9,19 @@ export interface Fingerprint {
 
 export class FingerprintClient {
   private worker?: Worker
+  private disposed = false
   private pending = new Map<string, { resolve: (value: Fingerprint) => void; reject: (reason: Error) => void; snapshotStartedAtMs: number }>()
 
   constructor() {
     if (window.__LYRICFIND_TEST__) return
-    this.worker = new Worker(new URL('./fingerprint.worker.ts', import.meta.url), { type: 'module' })
-    this.worker.addEventListener('message', (event: MessageEvent<FingerprintWorkerResponse>) => {
+    this.startWorker()
+  }
+
+  private startWorker(): Worker {
+    if (this.disposed) throw new Error('Fingerprint worker has been stopped.')
+    const worker = new Worker(new URL('./fingerprint.worker.ts', import.meta.url), { type: 'module' })
+    this.worker = worker
+    worker.addEventListener('message', (event: MessageEvent<FingerprintWorkerResponse>) => {
       const message = event.data
       if (message.type === 'ready') return
       if (!message.requestId) return
@@ -24,6 +31,26 @@ export class FingerprintClient {
       if (message.type === 'error') pending.reject(new Error(message.message))
       else pending.resolve({ signatureUri: message.signatureUri, sampleMs: message.sampleMs, snapshotStartedAtMs: pending.snapshotStartedAtMs })
     })
+    worker.addEventListener('error', (event) => {
+      event.preventDefault()
+      this.handleWorkerFailure(worker, 'Fingerprint worker failed to load or crashed.')
+    })
+    worker.addEventListener('messageerror', () => {
+      this.handleWorkerFailure(worker, 'Fingerprint worker returned an unreadable message.')
+    })
+    return worker
+  }
+
+  private handleWorkerFailure(worker: Worker, message: string): void {
+    if (this.worker !== worker) return
+    worker.terminate()
+    this.worker = undefined
+    this.rejectPending(new Error(message))
+  }
+
+  private rejectPending(error: Error): void {
+    for (const pending of this.pending.values()) pending.reject(error)
+    this.pending.clear()
   }
 
   create(snapshot: PcmSnapshot): Promise<Fingerprint> {
@@ -38,16 +65,24 @@ export class FingerprintClient {
     const requestId = crypto.randomUUID()
     return new Promise((resolve, reject) => {
       this.pending.set(requestId, { resolve, reject, snapshotStartedAtMs: snapshot.snapshotStartedAtMs })
-      this.worker!.postMessage({
-        type: 'fingerprint', requestId, samples: snapshot.samples,
-        sampleRateHz: snapshot.sampleRateHz, channelCount: 1,
-      }, [snapshot.samples.buffer])
+      try {
+        const worker = this.worker ?? this.startWorker()
+        worker.postMessage({
+          type: 'fingerprint', requestId, samples: snapshot.samples,
+          sampleRateHz: snapshot.sampleRateHz, channelCount: 1,
+        }, [snapshot.samples.buffer])
+      } catch (error) {
+        this.pending.delete(requestId)
+        snapshot.samples.fill(0)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
     })
   }
 
   terminate(): void {
+    this.disposed = true
     this.worker?.terminate()
-    for (const pending of this.pending.values()) pending.reject(new Error('Fingerprint worker stopped.'))
-    this.pending.clear()
+    this.worker = undefined
+    this.rejectPending(new Error('Fingerprint worker stopped.'))
   }
 }

@@ -26,38 +26,54 @@ export class AudioCapture {
       autoGainControl: false,
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
     }
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: constraints })
-    this.context = new AudioContext({ latencyHint: 'interactive' })
-    await this.context.audioWorklet.addModule(`${import.meta.env.BASE_URL}audio-capture-worklet.js`)
-    await this.context.resume()
-    this.buffer = new RollingPcmBuffer(this.context.sampleRate, 10)
-    this.source = this.context.createMediaStreamSource(this.stream)
-    this.processor = new AudioWorkletNode(this.context, 'lyricfind-capture', {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      outputChannelCount: [1],
-    })
-    this.processor.port.onmessage = (event: MessageEvent<{ samples: Float32Array }>) => {
-      if (event.data.samples instanceof Float32Array) this.buffer?.push(event.data.samples)
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: constraints })
+      this.context = new AudioContext({ latencyHint: 'interactive' })
+      await this.context.audioWorklet.addModule(`${import.meta.env.BASE_URL}audio-capture-worklet.js`)
+      await this.context.resume()
+      this.buffer = new RollingPcmBuffer(this.context.sampleRate, 10)
+      this.source = this.context.createMediaStreamSource(this.stream)
+      this.processor = new AudioWorkletNode(this.context, 'lyricfind-capture', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      })
+      this.processor.port.onmessage = (event: MessageEvent<{ samples: Float32Array }>) => {
+        if (event.data.samples instanceof Float32Array) this.buffer?.push(event.data.samples)
+      }
+      this.mutedOutput = this.context.createGain()
+      this.mutedOutput.gain.value = 0
+      this.source.connect(this.processor).connect(this.mutedOutput).connect(this.context.destination)
+    } catch (error) {
+      // A failed worklet/context setup occurs after permission and may already
+      // own a live microphone track. Release every partial resource first.
+      await this.stop().catch(() => undefined)
+      throw error
     }
-    this.mutedOutput = this.context.createGain()
-    this.mutedOutput.gain.value = 0
-    this.source.connect(this.processor).connect(this.mutedOutput).connect(this.context.destination)
   }
 
   async stop(): Promise<void> {
-    this.processor?.disconnect()
-    this.source?.disconnect()
-    this.mutedOutput?.disconnect()
-    this.stream?.getTracks().forEach((track) => track.stop())
-    if (this.context && this.context.state !== 'closed') await this.context.close()
-    this.buffer?.clear()
+    const processor = this.processor
+    const source = this.source
+    const mutedOutput = this.mutedOutput
+    const stream = this.stream
+    const context = this.context
+    const buffer = this.buffer
     this.stream = undefined
     this.context = undefined
     this.source = undefined
     this.processor = undefined
     this.mutedOutput = undefined
     this.buffer = undefined
+
+    try { processor?.disconnect() } catch { /* already disconnected */ }
+    try { source?.disconnect() } catch { /* already disconnected */ }
+    try { mutedOutput?.disconnect() } catch { /* already disconnected */ }
+    stream?.getTracks().forEach((track) => {
+      try { track.stop() } catch { /* track already ended */ }
+    })
+    buffer?.clear()
+    if (context && context.state !== 'closed') await context.close().catch(() => undefined)
   }
 
   snapshot(): PcmSnapshot | undefined {

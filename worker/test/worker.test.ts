@@ -14,7 +14,8 @@ function limiter(success = true): RateLimitBinding {
 
 function env(rateLimiter = limiter()): Env {
   return {
-    RECOGNITION_RATE_LIMITER: rateLimiter,
+    RECOGNITION_CLIENT_RATE_LIMITER: rateLimiter,
+    RECOGNITION_IP_RATE_LIMITER: limiter(),
     ALLOWED_ORIGINS:
       "https://aarushpawar.github.io,http://localhost:5173,http://127.0.0.1:5173",
   };
@@ -28,15 +29,17 @@ function request(
   },
   init: RequestInit = {},
 ): Request {
+  const { headers, ...rest } = init;
   return new Request("https://worker.example/recognize", {
     method: "POST",
+    ...rest,
     headers: {
       "Content-Type": "application/json",
       Origin: ALLOWED_ORIGIN,
-      ...init.headers,
+      "CF-Connecting-IP": "203.0.113.42",
+      ...headers,
     },
     body: JSON.stringify(body),
-    ...init,
   });
 }
 
@@ -115,6 +118,17 @@ describe("worker routes", () => {
     expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 
+  it("rejects originless recognition requests", async () => {
+    const response = await createWorker().fetch(
+      request(undefined, { headers: { Origin: "" } }),
+      env(),
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "origin_required" },
+    });
+  });
+
   it("rejects malformed request fields before rate limiting", async () => {
     const rateLimiter = limiter();
     const response = await createWorker().fetch(
@@ -123,6 +137,20 @@ describe("worker routes", () => {
     );
     expect(response.status).toBe(400);
     expect(rateLimiter.limit).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Cloudflare client identity is unavailable", async () => {
+    const clientLimiter = limiter();
+    const testEnv = env(clientLimiter);
+    const response = await createWorker().fetch(
+      request(undefined, { headers: { "CF-Connecting-IP": "" } }),
+      testEnv,
+    );
+    expect(response.status).toBe(400);
+    expect(clientLimiter.limit).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "client_identity_unavailable" },
+    });
   });
 
   it("rejects invalid JSON before rate limiting", async () => {
@@ -156,7 +184,7 @@ describe("worker routes", () => {
     );
     expect(response.status).toBe(200);
     expect(rateLimiter.limit).toHaveBeenCalledWith({
-      key: `recognize:${CLIENT_ID}`,
+      key: `recognize:client:${CLIENT_ID}`,
     });
     expect(upstream).toHaveBeenCalledOnce();
     const upstreamInit = vi.mocked(upstream).mock.calls[0]?.[1];
@@ -171,7 +199,7 @@ describe("worker routes", () => {
   });
 
   it("returns no_match for an upstream miss", async () => {
-    const upstream = vi.fn().mockResolvedValue(
+    const upstream = vi.fn().mockImplementation(async () =>
       Response.json({ matches: [] }),
     ) as unknown as typeof fetch;
     const response = await createWorker({ fetchImpl: upstream }).fetch(
@@ -210,5 +238,32 @@ describe("worker routes", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("Retry-After")).toBe("60");
     expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("uses Cloudflare's connecting IP so rotating UUIDs cannot bypass the limit", async () => {
+    let calls = 0;
+    const ipLimiter: RateLimitBinding = {
+      limit: vi.fn().mockImplementation(async () => ({ success: ++calls <= 10 })),
+    };
+    const testEnv = env();
+    testEnv.RECOGNITION_IP_RATE_LIMITER = ipLimiter;
+    const upstream = vi.fn().mockImplementation(async () =>
+      Response.json({ matches: [] }),
+    ) as unknown as typeof fetch;
+    const handler = createWorker({ fetchImpl: upstream });
+
+    for (let index = 0; index < 10; index += 1) {
+      const clientId = `7cb4a072-98a1-4b34-91f0-${String(index).padStart(12, "0")}`;
+      expect((await handler.fetch(request({ clientId, signatureUri: SIGNATURE, sampleMs: 10_000 }), testEnv)).status).toBe(200);
+    }
+    const rotatedClientId = "7cb4a072-98a1-4b34-91f0-999999999999";
+    const blocked = await handler.fetch(
+      request({ clientId: rotatedClientId, signatureUri: SIGNATURE, sampleMs: 10_000 }),
+      testEnv,
+    );
+    expect(blocked.status).toBe(429);
+    expect(ipLimiter.limit).toHaveBeenLastCalledWith({
+      key: "recognize:ip:203.0.113.42",
+    });
   });
 });
