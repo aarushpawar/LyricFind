@@ -180,8 +180,12 @@ export default function App() {
     } catch (error) {
       if (epoch !== scanEpochRef.current || controller.signal.aborted) return
       // ponytail: one transient blip (Shazam 429 → 502) recovers next scan; only surface
-      // the error after two consecutive failures so a lone blip stays silent.
-      if (++failureCountRef.current < 2) return
+      // the error after two consecutive failures so a lone blip stays silent. Still leave
+      // the 'recognizing' phase, or the scan button stays disabled until the song ends.
+      if (++failureCountRef.current < 2) {
+        dispatch({ type: 'LISTENING' })
+        return
+      }
       dispatch({ type: 'NETWORK_ERROR', message: error instanceof Error ? error.message : 'Recognition is temporarily unavailable. Retrying…' })
     } finally {
       if (scanAbortRef.current === controller) scanAbortRef.current = undefined
