@@ -58,27 +58,25 @@ export function lyricsFromResult(result: LrcLibResult | undefined): Lyrics {
 }
 
 export async function fetchLyrics(track: Track, signal?: AbortSignal): Promise<Lyrics> {
-  async function search(url: string): Promise<LrcLibResult[]> {
+  async function request<T>(url: string, empty: T): Promise<T> {
     const response = await fetch(url, {
       signal,
       headers: { 'Lrclib-Client': 'LyricFind/0.1 (https://aarushpawar.github.io/LyricFind/)' },
     })
-    if (response.status === 404) return []
+    if (response.status === 404) return empty
     if (!response.ok) throw new Error(`Lyrics lookup failed (${response.status})`)
-    return await response.json() as LrcLibResult[]
+    return await response.json() as T
   }
 
-  const all: LrcLibResult[] = []
-
-  // ISRC is the strongest signal; if it matches, skip the track/artist query entirely.
-  if (track.isrc) {
-    all.push(...await search(`https://lrclib.net/api/search?q=${encodeURIComponent(track.isrc)}`))
-    const selected = selectLyricsResult(all, track)
-    if (selected?.isrc) return lyricsFromResult(selected)
-  }
-
+  // /api/get is an indexed exact-match lookup: far faster and a tiny payload vs. the
+  // fuzzy /api/search (which returns ~60KB of candidates). LRCLIB does not index ISRC,
+  // so a ?q=ISRC search always returns []; don't waste a round-trip on it.
   const params = new URLSearchParams({ track_name: track.title, artist_name: track.artist })
   if (track.album) params.set('album_name', track.album)
-  all.push(...await search(`https://lrclib.net/api/search?${params}`))
-  return lyricsFromResult(selectLyricsResult(all, track))
+  const exact = await request<LrcLibResult | null>(`https://lrclib.net/api/get?${params}`, null)
+  if (exact) return lyricsFromResult(exact)
+
+  // Fall back to fuzzy search only when the exact lookup misses.
+  const candidates = await request<LrcLibResult[]>(`https://lrclib.net/api/search?${params}`, [])
+  return lyricsFromResult(selectLyricsResult(candidates, track))
 }

@@ -21,6 +21,8 @@ async function mockServices(page: Page, recognition: object | (() => object), ly
   await page.route('https://recognition.test/recognize', async (route) => {
     await route.fulfill({ json: typeof recognition === 'function' ? recognition() : recognition })
   })
+  // /api/get is tried first; 404 it so tests exercise the /api/search fallback with array fixtures.
+  await page.route('https://lrclib.net/api/get**', async (route) => route.fulfill({ status: 404, json: {} }))
   await page.route('https://lrclib.net/api/search**', async (route) => route.fulfill({ json: lyrics }))
 }
 
