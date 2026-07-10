@@ -237,7 +237,8 @@ export function createWorker(dependencies: HandlerDependencies = {}) {
         );
         return json(request, env, result);
       } catch (cause) {
-        console.error("Recognition upstream failed", cause);
+        const transient = (cause as { transient?: boolean })?.transient === true;
+        console[transient ? "warn" : "error"]("Recognition upstream failed", cause);
         return error(
           request,
           env,

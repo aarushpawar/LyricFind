@@ -58,29 +58,27 @@ export function lyricsFromResult(result: LrcLibResult | undefined): Lyrics {
 }
 
 export async function fetchLyrics(track: Track, signal?: AbortSignal): Promise<Lyrics> {
-  const params = new URLSearchParams({
-    track_name: track.title,
-    artist_name: track.artist,
-  })
-  if (track.album) params.set('album_name', track.album)
-
-  const queries: string[] = []
-  if (track.isrc) queries.push(`https://lrclib.net/api/search?q=${encodeURIComponent(track.isrc)}`)
-  queries.push(`https://lrclib.net/api/search?${params}`)
-
-  const all: LrcLibResult[] = []
-  for (const url of queries) {
+  async function search(url: string): Promise<LrcLibResult[]> {
     const response = await fetch(url, {
       signal,
       headers: { 'Lrclib-Client': 'LyricFind/0.1 (https://aarushpawar.github.io/LyricFind/)' },
     })
-    if (!response.ok) {
-      if (response.status === 404) continue
-      throw new Error(`Lyrics lookup failed (${response.status})`)
-    }
-    all.push(...await response.json() as LrcLibResult[])
-    const selected = selectLyricsResult(all, track)
-    if (selected?.isrc || (!track.isrc && selected)) return lyricsFromResult(selected)
+    if (response.status === 404) return []
+    if (!response.ok) throw new Error(`Lyrics lookup failed (${response.status})`)
+    return await response.json() as LrcLibResult[]
   }
+
+  const all: LrcLibResult[] = []
+
+  // ISRC is the strongest signal; if it matches, skip the track/artist query entirely.
+  if (track.isrc) {
+    all.push(...await search(`https://lrclib.net/api/search?q=${encodeURIComponent(track.isrc)}`))
+    const selected = selectLyricsResult(all, track)
+    if (selected?.isrc) return lyricsFromResult(selected)
+  }
+
+  const params = new URLSearchParams({ track_name: track.title, artist_name: track.artist })
+  if (track.album) params.set('album_name', track.album)
+  all.push(...await search(`https://lrclib.net/api/search?${params}`))
   return lyricsFromResult(selectLyricsResult(all, track))
 }
