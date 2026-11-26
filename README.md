@@ -4,6 +4,10 @@
 [![Deploy recognition Worker](https://github.com/aarushpawar/LyricFind/actions/workflows/worker.yml/badge.svg)](https://github.com/aarushpawar/LyricFind/actions/workflows/worker.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+![Demo recording of LyricFind. The microphone, the recognition Worker and LRCLIB are stubbed in this recording, so no real audio is heard; it shows the real UI highlighting synced lyrics for a fake song.](docs/demo.gif)
+
+The demo is a stubbed run (mock microphone and mock recognition/lyrics responses), made with `scripts/record-demo.mjs`. The match rate and time-to-first-lyric over real songs have not been measured.
+
 LyricFind is a responsive, privacy-conscious karaoke companion for the music playing around you. It captures a rolling ten-second microphone window in the browser, generates a Shazam-compatible fingerprint locally with WebAssembly, and sends only that fingerprint to a small Cloudflare Worker. Lyrics come directly from LRCLIB and are highlighted against a monotonic playback clock.
 
 Production URL: `https://aarushpawar.github.io/LyricFind/`
